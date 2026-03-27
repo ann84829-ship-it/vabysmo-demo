@@ -3,44 +3,41 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Vabysmo 視覺模擬 - PSP Demo</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://raw.githack.com/AR-js-org/AR.js/master/three.js/build/ar.js"></script>
+    <title>Vabysmo Vision AR - Final Fix</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r126/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js@3.3.2/three.js/build/ar.js"></script>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #000; font-family: "Microsoft JhengHei", sans-serif; }
-        #ui-layer {
-            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
-            width: 85%; background: rgba(255, 255, 255, 0.9);
-            padding: 20px; border-radius: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.3);
-            text-align: center; z-index: 100;
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
+        #ui {
+            position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%);
+            width: 80%; background: rgba(255,255,255,0.9); padding: 20px;
+            border-radius: 20px; text-align: center; z-index: 1000;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
         }
-        .slider-label { display: block; font-weight: bold; color: #333; margin-bottom: 10px; font-size: 16px; }
-        input[type=range] { width: 100%; height: 15px; border-radius: 5px; background: #ddd; outline: none; }
-        .hint { font-size: 12px; color: #888; margin-top: 8px; }
+        input[type=range] { width: 100%; cursor: pointer; }
+        .label { font-weight: bold; font-size: 16px; color: #333; margin-bottom: 10px; display: block; }
     </style>
 </head>
 <body>
 
-    <div id="ui-layer">
-        <span class="slider-label">模擬病狀程度 (滑動看治療效果)</span>
-        <input type="range" id="vabysmo-slider" min="0" max="100" value="70">
-        <div class="hint">左：未治療 (水腫嚴重) | 右：穩定治療 (視界清晰)</div>
+    <div id="ui">
+        <span class="label">模擬黃斑部病變 (左右滑動看治療效果)</span>
+        <input type="range" id="slider" min="0" max="100" value="70">
     </div>
 
     <script>
-        // 1. Vertex Shader (頂點著色器)
-        const vshader = `
+        // --- Shader 定義 ---
+        const _vshader = `
             varying vec2 vUv;
             void main() {
                 vUv = uv;
-                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                gl_Position = vec4(position, 1.0);
             }
         `;
 
-        // 2. Fragment Shader (片元著色器 - 核心邏輯)
-        const fshader = `
+        const _fshader = `
             uniform sampler2D tDiffuse;
-            uniform float uIntensity; // 強度由 Slider 控制
+            uniform float uStrength;
             varying vec2 vUv;
 
             void main() {
@@ -48,28 +45,8 @@
                 vec2 p = vUv - center;
                 float r = length(p);
 
-                // --- 模擬變視症 (扭曲) ---
-                // 使用 Sin 波根據距離中心點的遠近產生位移
-                float wave = sin(r * 30.0) * (uIntensity * 0.025);
-                
+                // 變視症扭曲邏輯
+                float distortion = sin(r * 30.0) * (uStrength * 0.03);
                 vec2 distortedUv = vUv;
                 if (r < 0.4) {
-                    // 只有靠近黃斑部區域會扭曲，且邊緣平滑過渡
-                    float edgeFade = smoothstep(0.4, 0.15, r);
-                    distortedUv = vUv + normalize(p) * wave * edgeFade;
-                }
-
-                vec4 color = texture2D(tDiffuse, distortedUv);
-
-                // --- 模擬中心暗點 (積液/黑影) ---
-                // 當 r 越小，黑影越濃
-                float scotoma = smoothstep(0.3 * uIntensity, 0.08 * uIntensity, r);
-                vec3 scotomaColor = vec3(0.15, 0.1, 0.05); // 深褐色
-                
-                color.rgb = mix(color.rgb, scotomaColor, scotoma * 0.8);
-
-                gl_FragColor = color;
-            }
-        `;
-
-        let scene, camera, renderer, arSource
+                    float
