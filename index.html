@@ -3,30 +3,56 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Vabysmo Vision AR - Final Fix</title>
+    <title>Vabysmo AR Fix</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r126/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js@3.3.2/three.js/build/ar.js"></script>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
+        
+        /* 啟動按鈕遮罩 */
+        #overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8); color: white;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            z-index: 9999;
+        }
+        #start-btn {
+            padding: 15px 40px; font-size: 20px; cursor: pointer;
+            border-radius: 30px; border: none; background: #007AFF; color: white;
+        }
+
         #ui {
             position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%);
             width: 80%; background: rgba(255,255,255,0.9); padding: 20px;
-            border-radius: 20px; text-align: center; z-index: 1000;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            border-radius: 20px; text-align: center; z-index: 1000; display: none;
         }
-        input[type=range] { width: 100%; cursor: pointer; }
-        .label { font-weight: bold; font-size: 16px; color: #333; margin-bottom: 10px; display: block; }
+        input[type=range] { width: 100%; }
     </style>
 </head>
 <body>
 
+    <div id="overlay">
+        <h2>Vabysmo 視覺模擬器</h2>
+        <p>請點擊下方按鈕啟動相機</p>
+        <button id="start-btn">開始體驗</button>
+    </div>
+
     <div id="ui">
-        <span class="label">模擬黃斑部病變 (左右滑動看治療效果)</span>
+        <span style="font-weight:bold; color:#333;">模擬黃斑部病變程度</span>
         <input type="range" id="slider" min="0" max="100" value="70">
     </div>
 
     <script>
-        // --- Shader 定義 ---
+        let scene, camera, renderer, arToolkitSource, material, videoTexture;
+
+        // 點擊按鈕才開始初始化
+        document.getElementById('start-btn').addEventListener('click', function() {
+            document.getElementById('overlay').style.display = 'none';
+            document.getElementById('ui').style.display = 'block';
+            init();
+            animate();
+        });
+
         const _vshader = `
             varying vec2 vUv;
             void main() {
@@ -39,14 +65,79 @@
             uniform sampler2D tDiffuse;
             uniform float uStrength;
             varying vec2 vUv;
-
             void main() {
                 vec2 center = vec2(0.5, 0.5);
                 vec2 p = vUv - center;
                 float r = length(p);
-
-                // 變視症扭曲邏輯
                 float distortion = sin(r * 30.0) * (uStrength * 0.03);
                 vec2 distortedUv = vUv;
                 if (r < 0.4) {
-                    float
+                    float mask = smoothstep(0.4, 0.1, r);
+                    distortedUv = vUv + normalize(p) * distortion * mask;
+                }
+                vec4 color = texture2D(tDiffuse, distortedUv);
+                float scotoma = smoothstep(0.28 * uStrength, 0.05 * uStrength, r);
+                vec3 darkColor = vec3(0.12, 0.08, 0.04); 
+                color.rgb = mix(color.rgb, darkColor, scotoma * 0.85);
+                gl_FragColor = color;
+            }
+        `;
+
+        function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.Camera();
+            scene.add(camera);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.body.appendChild(renderer.domElement);
+
+            arToolkitSource = new THREEx.ArToolkitSource({ sourceType: 'webcam' });
+
+            arToolkitSource.init(function onReady() {
+                const video = arToolkitSource.domElement;
+                video.setAttribute('playsinline', '');
+                video.setAttribute('muted', '');
+                video.play(); // 使用者點擊後，這裡的 play() 才會生效
+
+                videoTexture = new THREE.VideoTexture(video);
+                material.uniforms.tDiffuse.value = videoTexture;
+                
+                setTimeout(onResize, 500);
+            });
+
+            window.addEventListener('resize', onResize);
+
+            const geometry = new THREE.PlaneGeometry(2, 2);
+            material = new THREE.ShaderMaterial({
+                uniforms: {
+                    tDiffuse: { value: new THREE.Texture() },
+                    uStrength: { value: 0.7 }
+                },
+                vertexShader: _vshader,
+                fragmentShader: _fshader
+            });
+
+            const mesh = new THREE.Mesh(geometry, material);
+            scene.add(mesh);
+
+            document.getElementById('slider').addEventListener('input', (e) => {
+                material.uniforms.uStrength.value = e.target.value / 100;
+            });
+        }
+
+        function onResize() {
+            arToolkitSource.onResizeElement();
+            arToolkitSource.copyElementSizeTo(renderer.domElement);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (arToolkitSource && arToolkitSource.ready) {
+                renderer.render(scene, camera);
+            }
+        }
+    </script>
+</body>
+</html>
